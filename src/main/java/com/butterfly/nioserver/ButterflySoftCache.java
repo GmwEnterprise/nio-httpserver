@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class ButterflySoftCache {
 
+    // 用来缓存请求报文二进制数据
     public static class CacheEntry {
         public byte[] header;
         public byte[] body;
@@ -15,7 +16,6 @@ public class ButterflySoftCache {
             this.header = header;
             this.body = body;
         }
-
     }
 
     public static class MapEntry extends SoftReference<CacheEntry> {
@@ -29,12 +29,12 @@ public class ButterflySoftCache {
 
     }
 
-    private ReferenceQueue<CacheEntry> queue = new ReferenceQueue<CacheEntry>();
+    private final ReferenceQueue<CacheEntry> queue = new ReferenceQueue<>();
 
     /**
      * the back map used
      */
-    private Map<String, MapEntry> map = new ConcurrentHashMap<String, MapEntry>();
+    private final Map<String, MapEntry> map = new ConcurrentHashMap<>();
 
     public CacheEntry get(String key) {
         CacheEntry result = null;

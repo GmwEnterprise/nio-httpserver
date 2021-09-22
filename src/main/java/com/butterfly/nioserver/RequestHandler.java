@@ -17,14 +17,14 @@ import java.util.*;
 import static com.butterfly.nioserver.HttpResponseHeaderBuilder.*;
 
 public class RequestHandler implements Runnable {
+    private static final Logger logger = LoggerFactory.getLogger(RequestHandler.class);
 
-    private static final DateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+    private static final DateFormat FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
 
     static {
-        formatter.setTimeZone(TimeZone.getDefault());
+        FORMAT.setTimeZone(TimeZone.getDefault());
     }
 
-    private static final Logger logger = LoggerFactory.getLogger(RequestHandler.class);
     private final ButterflySoftCache cache;
     private final List<RequestSegmentHeader> pendingRequestSegment = new ArrayList<>();
     private final Map<SocketChannel, RequestHeaderHandler> requestMap = new WeakHashMap<>();
@@ -74,7 +74,7 @@ public class RequestHandler implements Runnable {
                 while (pendingRequestSegment.isEmpty()) {
                     try {
                         pendingRequestSegment.wait();
-                    } catch (InterruptedException e) {
+                    } catch (InterruptedException ignored) {
                     }
                 }
                 requestData = pendingRequestSegment.remove(0);
@@ -120,7 +120,7 @@ public class RequestHandler implements Runnable {
 
                         // last modified header
                         Date lastModified = new Date(currentFile.lastModified());
-                        builder.addHeader(LAST_MODIFIED, formatter.format(lastModified));
+                        builder.addHeader(LAST_MODIFIED, FORMAT.format(lastModified));
 
                         // response header byte
                         head = builder.getHeader();

@@ -181,6 +181,8 @@ public class NioHttpServer implements Runnable {
             ConcurrentLinkedQueue<ByteBuffer> queue;
 
             // 缩小锁粒度
+            // 由于这个方法被worker线程调用，所以需要对map加锁访问
+            // 上面write方法里也要加锁
             synchronized (pendingSentMap) {
                 queue = pendingSentMap.computeIfAbsent(channel, k -> new ConcurrentLinkedQueue<>());
             }
