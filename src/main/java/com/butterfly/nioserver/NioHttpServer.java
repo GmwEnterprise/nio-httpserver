@@ -13,6 +13,7 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * 基于NIO的HTTP服务器类
@@ -25,7 +26,7 @@ public class NioHttpServer implements Runnable {
     private final Selector selector;
     private final ByteBuffer readBuffer = ByteBuffer.allocate(1024);
     private final List<ChangeRequest> changeRequests = new LinkedList<>();
-    private final Map<SocketChannel, List<ByteBuffer>> pendingSentMap = new HashMap<>();
+    private final Map<SocketChannel, ConcurrentLinkedQueue<ByteBuffer>> pendingSentMap = new HashMap<>();
     private final List<RequestHandler> requestHandlers = new ArrayList<>();
 
     public NioHttpServer(InetAddress address, int port) throws IOException {
@@ -78,14 +79,11 @@ public class NioHttpServer implements Runnable {
                         continue;
                     }
                     if (key.isAcceptable()) {
-                        // 处理新套接字连接
-                        accept();
+                        accept(); // 处理新套接字连接
                     } else if (key.isReadable()) {
-                        // 处理读事件
-                        read(key);
+                        read(key); // 处理读事件
                     } else if (key.isWritable()) {
-                        // 处理写事件
-                        write(key);
+                        write(key); // 处理写事件
                     }
                 }
             } catch (Exception e) {
@@ -154,30 +152,40 @@ public class NioHttpServer implements Runnable {
      */
     private void write(SelectionKey key) throws IOException {
         SocketChannel channel = (SocketChannel) key.channel();
+        ConcurrentLinkedQueue<ByteBuffer> queue;
+
+        // 缩小锁粒度
         synchronized (pendingSentMap) {
-            List<ByteBuffer> queue = pendingSentMap.get(channel);
-            while (!queue.isEmpty()) {
-                ByteBuffer buf = queue.get(0);
-                channel.write(buf);
-                // have more to send
-                if (buf.remaining() > 0) {
-                    break;
-                }
-                queue.remove(0);
+            queue = pendingSentMap.get(channel);
+        }
+
+        // 只启动了一个master线程，故下面对queue的操作是线程安全的
+        while (!queue.isEmpty()) {
+            ByteBuffer buf = queue.peek();
+            channel.write(buf);
+            // have more to send
+            if (buf.remaining() > 0) {
+                break;
             }
-            if (queue.isEmpty()) {
-                key.interestOps(SelectionKey.OP_READ);
-            }
+            queue.remove(buf);
+        }
+
+        if (queue.isEmpty()) {
+            key.interestOps(SelectionKey.OP_READ);
         }
     }
 
     public void send(SocketChannel channel, byte[] data) {
         synchronized (changeRequests) {
             changeRequests.add(new ChangeRequest(channel, ChangeRequest.CHANGE_OPS, SelectionKey.OP_WRITE));
+            ConcurrentLinkedQueue<ByteBuffer> queue;
+
+            // 缩小锁粒度
             synchronized (pendingSentMap) {
-                List<ByteBuffer> queue = pendingSentMap.computeIfAbsent(channel, k -> new LinkedList<>());
-                queue.add(ByteBuffer.wrap(data));
+                queue = pendingSentMap.computeIfAbsent(channel, k -> new ConcurrentLinkedQueue<>());
             }
+
+            queue.offer(ByteBuffer.wrap(data));
         }
         selector.wakeup();
     }
