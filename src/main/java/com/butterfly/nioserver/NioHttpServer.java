@@ -144,6 +144,7 @@ public class NioHttpServer implements Runnable {
             logger.debug("{} - {} - {}", selector.keys().size(), workerId, channel);
 
         // 选中的处理器去处理读取到的数据
+        // 主动往handler中添加需要处理的数据，等待handler异步处理
         requestHandlers.get(workerId).processData(channel, readBuffer.array(), readCount);
     }
 
@@ -159,24 +160,27 @@ public class NioHttpServer implements Runnable {
             queue = pendingSentMap.get(channel);
         }
 
-        // 只启动了一个master线程，故下面对queue的操作是线程安全的
+        // 单个NioHttpServer实例对应一个线程，保证了队列先peek再poll是针对同一个节点的
+        // ConcurrentLinkedQueue保证了队列的出入安全
         while (!queue.isEmpty()) {
-            ByteBuffer buf = queue.peek();
+            ByteBuffer buf = queue.peek(); // 返回头部
             channel.write(buf);
             // have more to send
             if (buf.remaining() > 0) {
                 break;
             }
-            queue.remove(buf);
+            queue.poll(); // 头部出队
         }
 
         if (queue.isEmpty()) {
+            // 该channel暂时没有数据可写时，取消关联写事件
             key.interestOps(SelectionKey.OP_READ);
         }
     }
 
     public void send(SocketChannel channel, byte[] data) {
         synchronized (changeRequests) {
+            // 添加写事件请求
             changeRequests.add(new ChangeRequest(channel, ChangeRequest.CHANGE_OPS, SelectionKey.OP_WRITE));
             ConcurrentLinkedQueue<ByteBuffer> queue;
 
@@ -187,7 +191,7 @@ public class NioHttpServer implements Runnable {
                 queue = pendingSentMap.computeIfAbsent(channel, k -> new ConcurrentLinkedQueue<>());
             }
 
-            queue.offer(ByteBuffer.wrap(data));
+            queue.offer(ByteBuffer.wrap(data)); // queue只会尾部入队
         }
         selector.wakeup();
     }
